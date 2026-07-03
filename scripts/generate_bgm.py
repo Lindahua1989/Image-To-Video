@@ -69,7 +69,8 @@ def generate_bgm(
     print(f"  Instrumental: {is_instrumental}")
 
     for attempt in range(1, max_retries + 1):
-        resp = requests.post(API_URL, headers=headers, json=payload, timeout=120)
+        print(f"  Calling API (attempt {attempt}/{max_retries}, may take 2-3 min)...")
+        resp = requests.post(API_URL, headers=headers, json=payload, timeout=300)
         result = resp.json()
 
         status = result.get("base_resp", {}).get("status_code", -1)
