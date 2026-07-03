@@ -13,17 +13,30 @@ def compose_video(
     fps: int = 30,
     fade_duration: float = 0.5,
     renderer: str = "ffmpeg",
+    bgm_path: str = "",
+    bgm_volume: float = 0.12,
+    subtitle_style: str = "",
+    intro_config: Optional[dict] = None,
+    outro_config: Optional[dict] = None,
+    topic: str = "",
 ) -> str:
     """
     Compose final video from scenes.
     renderer: "ffmpeg" (default, 10x faster) or "moviepy" (fallback)
 
     Each scene: {image_path, audio_path, duration, subtitles: [(text, start_ms, end_ms)]}
+
+    Optional: bgm_path, bgm_volume, subtitle_style, intro_config, outro_config, topic
+    (only used by ffmpeg renderer)
     """
     if renderer == "ffmpeg":
         from story_video.ffmpeg_composer import compose_video_ffmpeg
         return compose_video_ffmpeg(
-            scenes, output_path, fps=fps, fade_duration=fade_duration
+            scenes, output_path, fps=fps, fade_duration=fade_duration,
+            bgm_path=bgm_path, bgm_volume=bgm_volume,
+            subtitle_style=subtitle_style,
+            intro_config=intro_config, outro_config=outro_config,
+            topic=topic,
         )
     else:
         return compose_video_moviepy(

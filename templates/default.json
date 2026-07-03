@@ -1,0 +1,59 @@
+{
+  "name": "通用模板",
+  "description": "默认通用故事模板，适用于历史人物、诗词鉴赏、科普知识等各类主题",
+  "series": "",
+  "category": "",
+
+  "story": {
+    "system_prompt": "你是一位专业的短视频文案编剧，擅长将历史人物和事件改编成引人入胜的抖音短视频故事。\n\n用户会给你一个主题（如\"苏轼的赤壁怀古\"），你需要生成一个结构化的JSON故事脚本。\n\n要求：\n1. 生成4-6个场景（scenes）\n2. 每个场景包含：\n   - narration: 旁白文案（2-3句话，口语化，适合朗读，有感染力）\n   - image_prompt: 图片生成提示词（中文，详细描述画面内容、风格、光线、氛围）\n3. 旁白要符合历史事实，但用讲故事的方式表达，有悬念和情感\n4. 图片提示词要具体描述场景，包含人物、环境、服饰、光线、色调、艺术风格\n5. 图片艺术风格保持一致（如统一用水墨画风格、或统一用写实油画风格）\n6. 总时长控制在30-60秒（按每句旁白3-4秒估算）\n\n只返回JSON，不要其他文字。格式如下：\n{\n  \"title\": \"故事标题\",\n  \"art_style\": \"统一的艺术风格描述\",\n  \"scenes\": [\n    {\n      \"narration\": \"旁白文字...\",\n      \"image_prompt\": \"图片提示词...\"\n    }\n  ]\n}",
+
+    "user_prompt_template": "主题：{topic}\n\n请生成{num_scenes}个场景的历史故事短视频脚本。\n\n注意：\n- 旁白用中文，口语化，适合AI语音朗读\n- 图片提示词用中文，描述要具体，包含人物外貌、服饰、场景环境、光线、色调\n- 艺术风格要统一，建议用中国传统水墨画或工笔画风格（历史题材）\n- 第一个场景要引人入胜，最后一个场景要有情感升华或哲理总结"
+  },
+
+  "defaults": {
+    "voice": "yunxi",
+    "num_scenes": 5,
+    "art_style": ""
+  },
+
+  "bgm": {
+    "enabled": false,
+    "file": "",
+    "volume": 0.12
+  },
+
+  "intro": {
+    "enabled": false,
+    "duration": 2.5,
+    "title_template": "{topic}",
+    "subtitle_template": "",
+    "bg_color": "#1a0a2e",
+    "text_color": "#FFD700",
+    "subtitle_color": "#C0C0C0"
+  },
+
+  "outro": {
+    "enabled": false,
+    "duration": 2.5,
+    "text": "关注我\n看更多精彩故事",
+    "bg_color": "#1a0a2e",
+    "text_color": "#FFD700"
+  },
+
+  "subtitle_style": {
+    "fontname": "SimHei",
+    "fontsize": 18,
+    "bold": 1,
+    "primary_colour": "&H00FFFFFF",
+    "outline_colour": "&H00000000",
+    "border_style": 3,
+    "outline": 2,
+    "shadow": 0,
+    "margin_v": 60
+  },
+
+  "publish": {
+    "tags": ["历史故事", "知识分享", "短视频"],
+    "desc_template": ""
+  }
+}

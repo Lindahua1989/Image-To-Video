@@ -12,17 +12,23 @@ python scripts/generate_image.py --prompt "你的提示词" --provider volcengin
 ```
 
 ### 2. 历史故事短视频生成
-一句话生成抖音竖版短视频（1080x1920），包含旁白语音 + 字幕 + 图片动画。
+一句话生成抖音竖版短视频（1080x1920），包含旁白语音 + 字幕 + 图片动画 + 片头片尾 + 背景音乐。
 
 ```bash
-# 生成视频
+# 通用模式
 python -m story_video.main --topic "苏轼的赤壁怀古"
+
+# 中国神话人物系列（片头+片尾+BGM+工笔重彩画风）
+python -m story_video.main --topic "盘古" --template mythology
 
 # 生成并直接发布到抖音+小红书
 python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
 
 # 使用已有story.json发布已有视频
 python -m story_video.main --topic "test" --publish-only --story-file output/story_xxx/story.json --publish douyin
+
+# 查看可用模板
+python -m story_video.main --list-templates
 ```
 
 详细自动发布安装指南见 [docs/AUTO_PUBLISH_GUIDE.md](docs/AUTO_PUBLISH_GUIDE.md)。
@@ -31,8 +37,28 @@ python -m story_video.main --topic "test" --publish-only --story-file output/sto
 1. **文案 + 分镜**：由 AI 助手直接生成 story.json（旁白 + 图片提示词）
 2. **图片生成**：即梦AI doubao-seedream-5-0 生成场景图
 3. **语音合成**：edge-tts 生成中文旁白 + 字幕时间轴
-4. **视频合成**：FFmpeg 合成竖版视频（Ken Burns缩放 + 模糊背景 + 字幕 + 交叉转场）
+4. **视频合成**：FFmpeg 合成竖版视频（片头 + Ken Burns缩放 + 模糊背景 + 字幕 + 交叉转场 + 片尾 + BGM）
 5. **自动发布**：social-auto-upload 自动上传到抖音/小红书/B站等平台
+
+### 3. 模板系统
+模板定义了故事风格、画风、配音、BGM、片头片尾、发布标签等全套配置。
+
+```bash
+# 列出所有模板
+python -m story_video.main --list-templates
+
+# 使用神话模板
+python -m story_video.main --topic "女娲" --template mythology
+
+# 批量生成神话系列
+python scripts/generate_mythology_batch.py --status
+python scripts/generate_mythology_batch.py --count 5
+python scripts/generate_mythology_batch.py --name 盘古
+```
+
+已有模板：
+- `default` — 通用历史故事模板
+- `mythology` — 中国神话人物系列（108位人物，10大分类）
 
 ## 安装
 
@@ -97,10 +123,12 @@ python -m story_video.main --topic "test" --login xiaohongshu
 ## CLI 参数
 
 ```
---topic, -t          故事主题（必填）
---voice, -v          配音语音: yunxi/yunjian/xiaoxiao/yunyang
+--topic, -t          故事主题
+--template           模板名称: mythology, default (留空=通用)
+--list-templates     列出所有可用模板
+--voice, -v          配音语音: yunxi/yunjian/xiaoxiao/yunyang (留空=模板默认)
 --output, -o         输出视频路径
---num-scenes, -n     场景数量 (default: 5)
+--num-scenes, -n     场景数量 (0=模板默认)
 --renderer           渲染器: ffmpeg(默认) 或 moviepy
 --publish            发布平台: douyin,xiaohongshu
 --publish-only       仅发布已有视频
@@ -119,13 +147,21 @@ python -m story_video.main --topic "test" --login xiaohongshu
 │   ├── api-config.json               # 实际API配置（gitignore）
 │   ├── publish-config.example.json   # 发布配置模板
 │   └── publish-config.json           # 实际发布配置（gitignore）
+├── templates/
+│   ├── default.json                  # 通用故事模板
+│   ├── mythology.json                # 中国神话人物模板
+│   ├── mythology_characters.json     # 108位神话人物列表
+│   ├── mythology_progress.json       # 制作进度追踪
+│   └── assets/bgm/                   # 背景音乐文件目录
 ├── scripts/
 │   ├── generate_image.py             # 单张图片生成
+│   ├── generate_mythology_batch.py   # 神话系列批量生成
 │   └── story_video/
-│       ├── story_generator.py        # 故事脚本生成
+│       ├── story_generator.py        # 故事脚本生成（支持模板prompt）
 │       ├── tts_engine.py             # edge-tts 语音合成 + 字幕
-│       ├── ffmpeg_composer.py        # FFmpeg 视频合成（默认，10x加速）
+│       ├── ffmpeg_composer.py        # FFmpeg 视频合成（片头+片尾+BGM+字幕）
 │       ├── video_composer.py         # 视频合成入口（ffmpeg/moviepy切换）
+│       ├── template_loader.py        # 模板加载器
 │       ├── publisher.py              # 多平台自动发布模块
 │       └── main.py                   # 主编排器
 ├── output/                           # 生成结果（gitignore）

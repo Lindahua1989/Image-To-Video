@@ -24,12 +24,18 @@ from pathlib import Path
 from story_video.story_generator import generate_story, save_story
 from story_video.tts_engine import generate_audio, generate_srt
 from story_video.video_composer import compose_video
+from story_video.template_loader import (
+    load_template, list_templates, get_story_prompts,
+    get_defaults, get_bgm_config, get_intro_config, get_outro_config,
+    get_subtitle_style, get_publish_config, format_prompt,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent.parent
 OUTPUT_DIR = PROJECT_DIR / "output"
 CONFIG_PATH = PROJECT_DIR / "config" / "api-config.json"
 PUBLISH_CONFIG_PATH = PROJECT_DIR / "config" / "publish-config.json"
+TEMPLATES_DIR = PROJECT_DIR / "templates"
 
 IMAGE_MODEL = "doubao-seedream-5-0-260128"
 IMAGE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -127,8 +133,12 @@ def run_pipeline(
     skip_story: bool = False,
     skip_images: bool = False,
     story_file: str = "",
+    renderer: str = "ffmpeg",
+    template: dict = None,
 ) -> str:
     """Run the full story video generation pipeline."""
+    tpl = template or {}
+
     if story_file:
         work_dir = Path(story_file).resolve().parent
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +149,14 @@ def run_pipeline(
 
     if not output_path:
         output_path = str(work_dir / "video.mp4")
+
+    # Extract template configs
+    sys_prompt, usr_template = get_story_prompts(tpl)
+    defaults = get_defaults(tpl)
+    bgm_cfg = get_bgm_config(tpl)
+    intro_cfg = get_intro_config(tpl)
+    outro_cfg = get_outro_config(tpl)
+    sub_style = get_subtitle_style(tpl)
 
     # Step 1: Generate story script
     print("\n" + "=" * 60)
@@ -155,10 +173,10 @@ def run_pipeline(
             print(f"[Story] Loaded existing: {story_path}")
         else:
             print(f"[Story] File not found: {story_path}, generating new...")
-            story = generate_story(topic, api_key, num_scenes)
+            story = generate_story(topic, api_key, num_scenes, sys_prompt, usr_template)
             save_story(story, str(work_dir / "story.json"))
     else:
-        story = generate_story(topic, api_key, num_scenes)
+        story = generate_story(topic, api_key, num_scenes, sys_prompt, usr_template)
         save_story(story, str(story_path))
 
     # Step 2: Generate scene images
@@ -198,7 +216,25 @@ def run_pipeline(
             "subtitles": audio_data["subtitles"],
         })
 
-    compose_video(video_scenes, output_path, renderer="ffmpeg")
+    bgm_path = ""
+    if bgm_cfg.get("enabled") and bgm_cfg.get("file"):
+        bgm_full = PROJECT_DIR / bgm_cfg["file"]
+        if bgm_full.exists():
+            bgm_path = str(bgm_full)
+            print(f"[BGM] Using: {bgm_path} (volume={bgm_cfg.get('volume', 0.12)})")
+        else:
+            print(f"[BGM] File not found: {bgm_full}, skipping BGM")
+
+    compose_video(
+        video_scenes, output_path,
+        renderer=renderer,
+        bgm_path=bgm_path,
+        bgm_volume=bgm_cfg.get("volume", 0.12),
+        subtitle_style=sub_style,
+        intro_config=intro_cfg if intro_cfg.get("enabled") else None,
+        outro_config=outro_cfg if outro_cfg.get("enabled") else None,
+        topic=topic,
+    )
 
     print("\n" + "=" * 60)
     print(f"COMPLETE! Video: {output_path}")
@@ -208,21 +244,27 @@ def run_pipeline(
     return output_path
 
 
-def generate_publish_metadata(story: dict, topic: str) -> dict:
+def generate_publish_metadata(story: dict, topic: str, template: dict = None) -> dict:
     """Generate title, tags, description for publishing from story data."""
+    tpl_pub = get_publish_config(template or {})
+
     title = story.get("title", topic)
     if len(title) > 20:
         title = title[:20]
 
-    tags = ["历史故事", "知识分享", "短视频"]
+    tags = tpl_pub.get("tags", ["历史故事", "知识分享", "短视频"])
     for keyword in topic.replace("的", " ").split():
-        if keyword and len(keyword) <= 6:
+        if keyword and len(keyword) <= 6 and keyword not in tags:
             tags.append(keyword)
     tags = tags[:5]
 
-    scenes = story.get("scenes", [])
-    first_narration = scenes[0].get("narration", "") if scenes else ""
-    desc = first_narration[:80] if first_narration else title
+    desc_template = tpl_pub.get("desc_template", "")
+    if desc_template:
+        desc = desc_template.format(topic=topic)
+    else:
+        scenes = story.get("scenes", [])
+        first_narration = scenes[0].get("narration", "") if scenes else ""
+        desc = first_narration[:80] if first_narration else title
 
     return {"title": title, "tags": tags, "desc": desc}
 
@@ -233,13 +275,14 @@ def run_publish(
     topic: str,
     platforms: list,
     schedule: str = "",
+    template: dict = None,
 ):
     """Publish video to social media platforms."""
     from story_video.publisher import Publisher
 
     pub = Publisher()
 
-    meta = generate_publish_metadata(story, topic)
+    meta = generate_publish_metadata(story, topic, template)
     print(f"\n[Publish] Title: {meta['title']}")
     print(f"[Publish] Tags: {meta['tags']}")
     print(f"[Publish] Platforms: {platforms}")
@@ -264,20 +307,31 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+    # 通用模式
     python -m story_video.main --topic "苏轼的赤壁怀古"
     python -m story_video.main --topic "诸葛亮的空城计" --voice yunjian
-    python -m story_video.main --topic "岳飞的满江红" --num-scenes 4 --output my_video.mp4
-    python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
+
+    # 中国神话人物系列
+    python -m story_video.main --topic "盘古" --template mythology
+    python -m story_video.main --topic "女娲" --template mythology --publish douyin
+    python -m story_video.main --topic "夸父" --template mythology --skip-story --skip-images
+
+    # 查看可用模板
+    python -m story_video.main --list-templates
+
+    # 登录/发布
     python -m story_video.main --login douyin
     python -m story_video.main --topic "test" --publish-only --story-file output/story_xxx/story.json
         """,
     )
-    parser.add_argument("--topic", "-t", required=True, help="故事主题，如：苏轼的赤壁怀古")
-    parser.add_argument("--voice", "-v", default="yunxi",
-                        choices=["yunxi", "yunjian", "xiaoxiao", "yunyang"],
-                        help="配音语音 (default: yunxi)")
+    parser.add_argument("--topic", "-t", default="", help="故事主题，如：盘古")
+    parser.add_argument("--template", default="", help="模板名称 (如: mythology)")
+    parser.add_argument("--list-templates", action="store_true", help="列出所有可用模板")
+    parser.add_argument("--voice", "-v", default="",
+                        choices=["yunxi", "yunjian", "xiaoxiao", "yunyang", ""],
+                        help="配音语音 (留空则用模板默认)")
     parser.add_argument("--output", "-o", default="", help="输出视频路径")
-    parser.add_argument("--num-scenes", "-n", type=int, default=5, help="场景数量 (default: 5)")
+    parser.add_argument("--num-scenes", "-n", type=int, default=0, help="场景数量 (0=模板默认)")
     parser.add_argument("--api-key", default="", help="Volcengine API Key")
     parser.add_argument("--skip-story", action="store_true", help="跳过故事生成，使用已有story.json")
     parser.add_argument("--skip-images", action="store_true", help="跳过图片生成，使用已有图片")
@@ -290,7 +344,31 @@ Examples:
     parser.add_argument("--login", default="", help="登录平台(扫码): douyin 或 xiaohongshu")
     args = parser.parse_args()
 
+    # List templates
+    if args.list_templates:
+        print("Available templates:")
+        for name in list_templates():
+            tpl = load_template(name)
+            desc = tpl.get("description", "")[:60]
+            print(f"  {name:15s} - {tpl.get('name', '')}: {desc}")
+        return
+
+    if not args.topic and not args.login:
+        parser.error("--topic is required (or use --login / --list-templates)")
+
     api_key = args.api_key or load_api_key()
+
+    # Load template
+    template = {}
+    if args.template:
+        template = load_template(args.template)
+    else:
+        template = load_template("default")
+
+    # Apply template defaults
+    defaults = get_defaults(template)
+    voice = args.voice or defaults.get("voice", "yunxi")
+    num_scenes = args.num_scenes or defaults.get("num_scenes", 5)
 
     if args.login:
         from story_video.publisher import Publisher
@@ -309,7 +387,7 @@ Examples:
         with open(args.story_file, "r", encoding="utf-8") as f:
             story = json.load(f)
         platforms = [p.strip() for p in args.publish.split(",") if p.strip()]
-        run_publish(video_path, story, args.topic, platforms, args.schedule)
+        run_publish(video_path, story, args.topic, platforms, args.schedule, template)
         return
 
     if not api_key:
@@ -319,12 +397,14 @@ Examples:
     video_path = run_pipeline(
         topic=args.topic,
         api_key=api_key,
-        voice=args.voice,
+        voice=voice,
         output_path=args.output,
-        num_scenes=args.num_scenes,
+        num_scenes=num_scenes,
         skip_story=args.skip_story,
         skip_images=args.skip_images,
         story_file=args.story_file,
+        renderer=args.renderer,
+        template=template,
     )
 
     if args.publish:
@@ -335,7 +415,7 @@ Examples:
                 story = json.load(f)
         else:
             story = {"title": args.topic, "scenes": []}
-        run_publish(video_path, story, args.topic, platforms, args.schedule)
+        run_publish(video_path, story, args.topic, platforms, args.schedule, template)
 
 
 if __name__ == "__main__":

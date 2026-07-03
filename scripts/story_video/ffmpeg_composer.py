@@ -22,6 +22,226 @@ FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
 
 ZOOM_PRESETS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_down"]
 
+DEFAULT_SUBTITLE_STYLE = (
+    "Fontname=SimHei,Fontsize=18,Bold=1,"
+    "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+    "BorderStyle=3,Outline=2,Shadow=0,MarginV=60"
+)
+
+
+def _hex_to_rgb(hex_color: str) -> tuple:
+    """Convert #RRGGBB to (R, G, B) tuple for PIL."""
+    c = hex_color.lstrip("#")
+    return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16))
+
+
+def _render_text_card_image(
+    width: int,
+    height: int,
+    bg_color: str,
+    lines: list,
+    output_path: str,
+) -> str:
+    """Render a text card image using PIL (avoids FFmpeg drawtext escaping issues)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    bg_rgb = _hex_to_rgb(bg_color)
+    img = Image.new("RGB", (width, height), bg_rgb)
+    draw = ImageDraw.Draw(img)
+
+    total_lines = len(lines)
+    center_y = height // 2
+
+    for idx, (text, color, fontsize) in enumerate(lines):
+        text_rgb = _hex_to_rgb(color)
+        try:
+            font = ImageFont.truetype(FONT_PATH, fontsize)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        spacing = 100
+        y_offset = -((total_lines - 1) * spacing) // 2 + idx * spacing
+        x = (width - text_w) // 2
+        y = center_y + y_offset - text_h // 2
+
+        draw.text((x, y), text, fill=text_rgb, font=font)
+
+    img.save(output_path, "PNG")
+    return output_path
+
+
+def _generate_intro_video(
+    config: dict,
+    topic: str,
+    output_path: str,
+    fps: int = FPS,
+) -> str:
+    """Generate intro title card video: PIL image → FFmpeg video with fades."""
+    duration = config.get("duration", 2.5)
+    bg_color = config.get("bg_color", "#1a0a2e")
+    text_color = config.get("text_color", "#FFD700")
+    subtitle_color = config.get("subtitle_color", "#C0C0C0")
+
+    title = config.get("title_template", "{topic}").format(topic=topic)
+    subtitle = config.get("subtitle_template", "")
+
+    work_dir = Path(output_path).parent
+    img_path = str(work_dir / "_intro_card.png")
+
+    lines = [(title, text_color, 90)]
+    if subtitle:
+        lines.append((subtitle, subtitle_color, 40))
+
+    _render_text_card_image(TARGET_W, TARGET_H, bg_color, lines, img_path)
+
+    fade_in_end = min(0.5, duration / 3)
+    fade_out_start = duration - fade_in_end
+
+    cmd = [
+        FFMPEG, "-y",
+        "-loop", "1", "-framerate", str(fps), "-t", f"{duration:.3f}",
+        "-i", img_path,
+        "-vf", f"fade=t=in:st=0:d={fade_in_end},fade=t=out:st={fade_out_start}:d={fade_in_end},format=yuv420p",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-r", str(fps),
+        "-video_track_timescale", str(fps),
+        output_path,
+    ]
+    _run_ffmpeg(cmd, "Intro title card")
+    Path(img_path).unlink(missing_ok=True)
+    return output_path
+
+
+def _generate_outro_video(
+    config: dict,
+    output_path: str,
+    fps: int = FPS,
+) -> str:
+    """Generate outro follow-prompt video: PIL image → FFmpeg video with fades."""
+    duration = config.get("duration", 2.5)
+    bg_color = config.get("bg_color", "#1a0a2e")
+    text_color = config.get("text_color", "#FFD700")
+
+    text = config.get("text", "关注我\n看更多精彩故事")
+    lines_raw = text.split("\n")
+
+    work_dir = Path(output_path).parent
+    img_path = str(work_dir / "_outro_card.png")
+
+    lines = []
+    for idx, line in enumerate(lines_raw):
+        fontsize = 80 if idx == 0 else 44
+        lines.append((line, text_color, fontsize))
+
+    _render_text_card_image(TARGET_W, TARGET_H, bg_color, lines, img_path)
+
+    fade_in_end = min(0.5, duration / 3)
+    fade_out_start = duration - fade_in_end
+
+    cmd = [
+        FFMPEG, "-y",
+        "-loop", "1", "-framerate", str(fps), "-t", f"{duration:.3f}",
+        "-i", img_path,
+        "-vf", f"fade=t=in:st=0:d={fade_in_end},fade=t=out:st={fade_out_start}:d={fade_in_end},format=yuv420p",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+        "-pix_fmt", "yuv420p", "-r", str(fps),
+        "-video_track_timescale", str(fps),
+        output_path,
+    ]
+    _run_ffmpeg(cmd, "Outro follow card")
+    Path(img_path).unlink(missing_ok=True)
+    return output_path
+
+
+def _build_complete_audio(
+    scene_audio_files: List[str],
+    scene_durations: List[float],
+    output_path: str,
+    intro_duration: float = 0.0,
+    outro_duration: float = 0.0,
+    buffer: float = 0.3,
+    bgm_path: str = "",
+    bgm_volume: float = 0.12,
+) -> str:
+    """Build complete audio track: silence(intro) + narration + silence(outro) + BGM mix."""
+    work_dir = Path(output_path).parent
+
+    parts = []
+
+    if intro_duration > 0:
+        intro_silence = str(work_dir / "_silence_intro.mp3")
+        cmd = [
+            FFMPEG, "-y",
+            "-f", "lavfi",
+            "-i", f"anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-t", f"{intro_duration:.3f}",
+            "-c:a", "libmp3lame",
+            intro_silence,
+        ]
+        _run_ffmpeg(cmd, "Intro silence")
+        parts.append(intro_silence)
+
+    for af in scene_audio_files:
+        parts.append(af)
+
+    if outro_duration > 0:
+        outro_silence = str(work_dir / "_silence_outro.mp3")
+        cmd = [
+            FFMPEG, "-y",
+            "-f", "lavfi",
+            "-i", f"anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-t", f"{outro_duration:.3f}",
+            "-c:a", "libmp3lame",
+            outro_silence,
+        ]
+        _run_ffmpeg(cmd, "Outro silence")
+        parts.append(outro_silence)
+
+    if len(parts) == 1:
+        merged = parts[0]
+    else:
+        list_file = work_dir / "_audio_list.txt"
+        lines = [f"file '{p.replace(chr(92), '/')}'" for p in parts]
+        list_file.write_text("\n".join(lines), encoding="utf-8")
+
+        merged = str(work_dir / "_narration_full.mp3")
+        cmd = [
+            FFMPEG, "-y",
+            "-f", "concat", "-safe", "0", "-i", str(list_file),
+            "-c", "copy",
+            merged,
+        ]
+        _run_ffmpeg(cmd, "Merge narration + silence")
+        list_file.unlink(missing_ok=True)
+        for p in parts:
+            if "silence" in p:
+                Path(p).unlink(missing_ok=True)
+
+    if bgm_path and Path(bgm_path).exists():
+        mixed = str(work_dir / "_audio_final.mp3")
+        cmd = [
+            FFMPEG, "-y",
+            "-i", merged,
+            "-i", bgm_path,
+            "-filter_complex",
+            f"[1:a]aloop=loop=-1:size=2e9,volume={bgm_volume}[bgm];"
+            f"[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+            "-map", "[aout]",
+            "-c:a", "libmp3lame",
+            "-b:a", "128k",
+            mixed,
+        ]
+        _run_ffmpeg(cmd, "Mix BGM + narration")
+        if merged != parts[0]:
+            Path(merged).unlink(missing_ok=True)
+        merged = mixed
+
+    return merged
+
 
 def _build_zoompan_filter(
     effect: str,
@@ -125,11 +345,15 @@ def _generate_merged_srt(
     scenes: List[dict],
     output_path: str,
     fade_duration: float = FADE_DURATION,
+    time_offset: float = 0.0,
 ) -> str:
-    """Merge per-scene SRT timings into one global SRT file."""
+    """Merge per-scene SRT timings into one global SRT file.
+
+    time_offset: seconds to shift all timestamps (for intro duration).
+    """
     lines = []
     idx = 1
-    current_time = 0.0
+    current_time = time_offset
 
     for i, scene in enumerate(scenes):
         duration = scene["duration"]
@@ -153,7 +377,7 @@ def _generate_merged_srt(
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-    print(f"[FFmpeg] Merged SRT: {output_path} | {idx-1} entries")
+    print(f"[FFmpeg] Merged SRT: {output_path} | {idx-1} entries | offset={time_offset:.1f}s")
     return output_path
 
 
@@ -199,7 +423,8 @@ def _run_ffmpeg(cmd: List[str], label: str = "FFmpeg"):
     result = subprocess.run(
         cmd,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         stderr_tail = result.stderr[-3000:] if result.stderr else ""
@@ -212,6 +437,12 @@ def compose_video_ffmpeg(
     fps: int = FPS,
     fade_duration: float = FADE_DURATION,
     use_blur_bg: bool = True,
+    bgm_path: str = "",
+    bgm_volume: float = 0.12,
+    subtitle_style: str = "",
+    intro_config: Optional[dict] = None,
+    outro_config: Optional[dict] = None,
+    topic: str = "",
 ) -> str:
     """
     Compose final video using FFmpeg zoompan + xfade.
@@ -221,6 +452,13 @@ def compose_video_ffmpeg(
     2. Concatenate with xfade transitions + overlay subtitles + add audio
 
     Each scene: {image_path, audio_path, duration, subtitles: [(text, start_ms, end_ms)]}
+
+    Optional:
+    - bgm_path: path to BGM audio file, mixed at bgm_volume
+    - subtitle_style: FFmpeg force_style string for subtitles
+    - intro_config: dict with intro settings (enabled, duration, title_template, etc.)
+    - outro_config: dict with outro settings (enabled, duration, text, etc.)
+    - topic: used for intro title text
     """
     if not scenes:
         raise ValueError("No scenes to compose")
@@ -300,21 +538,48 @@ def compose_video_ffmpeg(
 
     print(f"[FFmpeg] Concatenating {n} scenes with xfade transitions...")
 
-    if n == 1:
-        final_video = scene_videos[0]
+    # Generate intro/outro if enabled
+    intro_dur = 0.0
+    outro_dur = 0.0
+
+    segments = []  # list of (video_path, duration)
+
+    if intro_config and intro_config.get("enabled"):
+        intro_path = str(work_dir / "_intro.mp4")
+        _generate_intro_video(intro_config, topic or "故事", intro_path, fps)
+        intro_dur = intro_config.get("duration", 2.5)
+        segments.append((intro_path, intro_dur))
+        print(f"[FFmpeg] Intro: {intro_dur:.1f}s")
+
+    for i, sv in enumerate(scene_videos):
+        segments.append((sv, scenes[i]["duration"]))
+
+    if outro_config and outro_config.get("enabled"):
+        outro_path = str(work_dir / "_outro.mp4")
+        _generate_outro_video(outro_config, outro_path, fps)
+        outro_dur = outro_config.get("duration", 2.5)
+        segments.append((outro_path, outro_dur))
+        print(f"[FFmpeg] Outro: {outro_dur:.1f}s")
+
+    total_n = len(segments)
+
+    if total_n == 1:
+        import shutil
+        shutil.copy2(segments[0][0], output_path)
     else:
         inputs = []
-        for sv in scene_videos:
-            inputs.extend(["-i", sv])
+        for sv_path, _ in segments:
+            inputs.extend(["-i", sv_path])
 
         filter_parts = []
         prev = "[0:v]"
-        accumulated = scenes[0]["duration"]
+        accumulated = segments[0][1]
 
-        for i in range(1, n):
+        for i in range(1, total_n):
             offset = accumulated - fade_duration
             new_label = f"[x{i}]"
-            transition = random.choice(["fade", "fade", "dissolve", "wipeleft"])
+            is_edge = (i == 1 and intro_dur > 0) or (i == total_n - 1 and outro_dur > 0)
+            transition = "fade" if is_edge else random.choice(["fade", "fade", "dissolve", "wipeleft"])
             filter_parts.append(
                 f"{prev}[{i}:v]xfade="
                 f"transition={transition}:"
@@ -322,19 +587,18 @@ def compose_video_ffmpeg(
                 f"offset={offset:.3f}{new_label}"
             )
             prev = new_label
-            accumulated += scenes[i]["duration"] - fade_duration
+            accumulated += segments[i][1] - fade_duration
 
         final_label = prev
 
+        style_str = subtitle_style or DEFAULT_SUBTITLE_STYLE
         srt_path = str(work_dir / "_subtitles.srt")
-        _generate_merged_srt(scenes, srt_path, fade_duration)
+        _generate_merged_srt(scenes, srt_path, fade_duration, time_offset=intro_dur)
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
         filter_parts.append(
             f"{final_label}subtitles="
             f"filename='{srt_escaped}':"
-            f"force_style='Fontname=SimHei,Fontsize=18,Bold=1,"
-            f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-            f"BorderStyle=3,Outline=2,Shadow=0,MarginV=60'"
+            f"force_style='{style_str}'"
             f"[vfinal]"
         )
 
@@ -344,14 +608,17 @@ def compose_video_ffmpeg(
         audio_input = []
         audio_map = []
         if audio_files:
-            if len(audio_files) == 1:
-                audio_input = ["-i", audio_files[0]]
-                audio_map = ["-map", f"{n}:a"]
-            else:
-                merged_audio = str(work_dir / "_merged_audio.mp3")
-                _merge_audio_files(audio_files, [s["duration"] for s in scenes], merged_audio)
-                audio_input = ["-i", merged_audio]
-                audio_map = ["-map", f"{n}:a"]
+            complete_audio = _build_complete_audio(
+                audio_files,
+                [s["duration"] for s in scenes],
+                str(work_dir / "_audio_complete.mp3"),
+                intro_duration=intro_dur,
+                outro_duration=outro_dur,
+                bgm_path=bgm_path,
+                bgm_volume=bgm_volume,
+            )
+            audio_input = ["-i", complete_audio]
+            audio_map = ["-map", f"{total_n}:a"]
 
         concat_cmd = [
             FFMPEG, "-y",
@@ -371,13 +638,19 @@ def compose_video_ffmpeg(
             concat_cmd.extend(["-c:a", "aac", "-b:a", "128k", "-shortest"])
 
         concat_cmd.append(str(output_path))
-        _run_ffmpeg(concat_cmd, f"Concatenate + subtitles ({n} scenes)")
+        _run_ffmpeg(concat_cmd, f"Concatenate + subtitles ({total_n} segments)")
 
-        for sv in scene_videos:
-            Path(sv).unlink(missing_ok=True)
-        for tmp in [work_dir / "_merged_audio.mp3", work_dir / "_subtitles.srt"]:
+        for sv_path, _ in segments:
+            Path(sv_path).unlink(missing_ok=True)
+        for tmp in [
+            work_dir / "_audio_complete.mp3",
+            work_dir / "_narration_full.mp3",
+            work_dir / "_audio_final.mp3",
+            work_dir / "_subtitles.srt",
+        ]:
             tmp.unlink(missing_ok=True)
 
     file_size = Path(output_path).stat().st_size / (1024 * 1024)
-    print(f"[FFmpeg] Done! {output_path} ({file_size:.1f} MB)")
+    total_dur = sum(s["duration"] for s in scenes) + intro_dur + outro_dur
+    print(f"[FFmpeg] Done! {output_path} ({file_size:.1f} MB, ~{total_dur:.1f}s)")
     return output_path
