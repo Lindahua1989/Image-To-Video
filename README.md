@@ -25,6 +25,8 @@ python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
 python -m story_video.main --topic "test" --publish-only --story-file output/story_xxx/story.json --publish douyin
 ```
 
+详细自动发布安装指南见 [docs/AUTO_PUBLISH_GUIDE.md](docs/AUTO_PUBLISH_GUIDE.md)。
+
 工作流：
 1. **文案 + 分镜**：由 AI 助手直接生成 story.json（旁白 + 图片提示词）
 2. **图片生成**：即梦AI doubao-seedream-5-0 生成场景图

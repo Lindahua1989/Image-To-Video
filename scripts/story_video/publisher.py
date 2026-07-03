@@ -77,7 +77,7 @@ class Publisher:
             cmd.append("--headless")
 
         print(f"[Publisher] Running: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         return result
 
     def check_cookie(self, platform: str) -> bool:
@@ -86,8 +86,11 @@ class Publisher:
             print(f"[Publisher] Platform '{platform}' not configured")
             return False
 
-        result = self._run_sau([platform, "check", "--account", self.account_name])
-        is_valid = result.returncode == 0 and "valid" in result.stdout.lower()
+        result = subprocess.run(
+            [self.sau_cli, platform, "check", "--account", self.account_name],
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        is_valid = result.returncode == 0 and result.stdout and "valid" in result.stdout.lower()
         print(f"[Publisher] {platform} cookie: {'valid' if is_valid else 'invalid'}")
         return is_valid
 
@@ -111,10 +114,13 @@ class Publisher:
         args = [platform, "login", "--account", self.account_name]
         if headed:
             args.append("--headed")
+        else:
+            args.append("--headless")
 
         print(f"[Publisher] Starting login for {platform}...")
         print("[Publisher] Please scan the QR code with your phone app")
-        result = subprocess.run([self.sau_cli] + args)
+        print(f"[Publisher] Browser window will open - keep it visible!")
+        result = subprocess.run([self.sau_cli] + args, timeout=300)
         if result.returncode == 0:
             print(f"[Publisher] Login successful for {platform}")
         else:
@@ -225,12 +231,20 @@ class Publisher:
             [self.sau_cli] + args,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
         if result.returncode == 0:
             return {"success": True, "message": "Published successfully"}
         else:
-            err = result.stderr[-500:] if result.stderr else result.stdout[-500:]
+            err = ""
+            if result.stderr:
+                err = result.stderr[-500:]
+            elif result.stdout:
+                err = result.stdout[-500:]
+            else:
+                err = "Unknown error (no output)"
             return {"success": False, "message": err.strip()}
 
     def generate_cover(

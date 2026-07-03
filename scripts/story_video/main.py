@@ -244,12 +244,7 @@ def run_publish(
     print(f"[Publish] Tags: {meta['tags']}")
     print(f"[Publish] Platforms: {platforms}")
 
-    cover_path = str(Path(video_path).parent / "cover.png")
-    try:
-        pub.generate_cover(video_path, meta["title"], cover_path)
-    except Exception as e:
-        print(f"[Publish] Cover generation failed: {e}")
-        cover_path = None
+    cover_path = None
 
     results = pub.publish(
         video_path=video_path,
