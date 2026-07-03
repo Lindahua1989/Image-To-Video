@@ -36,3 +36,6 @@ Thumbs.db
 # Temp files
 *.tmp
 *.bak
+
+# BGM audio files (large binary, generated/downloaded locally)
+templates/assets/bgm/*.mp3

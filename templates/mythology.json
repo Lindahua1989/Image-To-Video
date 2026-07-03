@@ -18,7 +18,7 @@
 
   "bgm": {
     "enabled": true,
-    "file": "templates/assets/bgm/《神祗长歌》梦回时光-流行.mp3",
+    "file": "templates/assets/bgm/mythology_bgm.mp3",
     "volume": 0.12
   },
 
