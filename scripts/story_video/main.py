@@ -4,12 +4,14 @@ Story Video Generator - 一句话生成历史人物故事短视频
 Usage:
     python -m story_video.main --topic "苏轼的赤壁怀古"
     python -m story_video.main --topic "诸葛亮的空城计" --voice yunxi --output video.mp4
+    python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
 
 Pipeline:
     1. LLM 生成故事脚本 + 分镜描述
     2. 即梦 AI 生成分镜图片
     3. edge-tts 合成旁白语音 + 字幕
-    4. moviepy 合成最终视频 (1080x1920 竖版)
+    4. FFmpeg 合成最终视频 (1080x1920 竖版)
+    5. (可选) 自动发布到抖音/小红书等平台
 """
 
 import argparse
@@ -27,6 +29,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent.parent
 OUTPUT_DIR = PROJECT_DIR / "output"
 CONFIG_PATH = PROJECT_DIR / "config" / "api-config.json"
+PUBLISH_CONFIG_PATH = PROJECT_DIR / "config" / "publish-config.json"
 
 IMAGE_MODEL = "doubao-seedream-5-0-260128"
 IMAGE_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -180,7 +183,7 @@ def run_pipeline(
 
     # Step 4: Compose video
     print("\n" + "=" * 60)
-    print("STEP 4: Compose video (moviepy)")
+    print("STEP 4: Compose video (FFmpeg)")
     print("=" * 60)
 
     scenes = story.get("scenes", [])
@@ -195,7 +198,7 @@ def run_pipeline(
             "subtitles": audio_data["subtitles"],
         })
 
-    compose_video(video_scenes, output_path)
+    compose_video(video_scenes, output_path, renderer="ffmpeg")
 
     print("\n" + "=" * 60)
     print(f"COMPLETE! Video: {output_path}")
@@ -203,6 +206,61 @@ def run_pipeline(
     print("=" * 60)
 
     return output_path
+
+
+def generate_publish_metadata(story: dict, topic: str) -> dict:
+    """Generate title, tags, description for publishing from story data."""
+    title = story.get("title", topic)
+    if len(title) > 20:
+        title = title[:20]
+
+    tags = ["历史故事", "知识分享", "短视频"]
+    for keyword in topic.replace("的", " ").split():
+        if keyword and len(keyword) <= 6:
+            tags.append(keyword)
+    tags = tags[:5]
+
+    scenes = story.get("scenes", [])
+    first_narration = scenes[0].get("narration", "") if scenes else ""
+    desc = first_narration[:80] if first_narration else title
+
+    return {"title": title, "tags": tags, "desc": desc}
+
+
+def run_publish(
+    video_path: str,
+    story: dict,
+    topic: str,
+    platforms: list,
+    schedule: str = "",
+):
+    """Publish video to social media platforms."""
+    from story_video.publisher import Publisher
+
+    pub = Publisher()
+
+    meta = generate_publish_metadata(story, topic)
+    print(f"\n[Publish] Title: {meta['title']}")
+    print(f"[Publish] Tags: {meta['tags']}")
+    print(f"[Publish] Platforms: {platforms}")
+
+    cover_path = str(Path(video_path).parent / "cover.png")
+    try:
+        pub.generate_cover(video_path, meta["title"], cover_path)
+    except Exception as e:
+        print(f"[Publish] Cover generation failed: {e}")
+        cover_path = None
+
+    results = pub.publish(
+        video_path=video_path,
+        title=meta["title"],
+        tags=meta["tags"],
+        cover_path=cover_path,
+        platforms=platforms,
+        schedule=schedule or None,
+        desc=meta["desc"],
+    )
+    return results
 
 
 def main():
@@ -214,6 +272,9 @@ Examples:
     python -m story_video.main --topic "苏轼的赤壁怀古"
     python -m story_video.main --topic "诸葛亮的空城计" --voice yunjian
     python -m story_video.main --topic "岳飞的满江红" --num-scenes 4 --output my_video.mp4
+    python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
+    python -m story_video.main --login douyin
+    python -m story_video.main --topic "test" --publish-only --story-file output/story_xxx/story.json
         """,
     )
     parser.add_argument("--topic", "-t", required=True, help="故事主题，如：苏轼的赤壁怀古")
@@ -226,14 +287,41 @@ Examples:
     parser.add_argument("--skip-story", action="store_true", help="跳过故事生成，使用已有story.json")
     parser.add_argument("--skip-images", action="store_true", help="跳过图片生成，使用已有图片")
     parser.add_argument("--story-file", default="", help="指定story.json路径")
+    parser.add_argument("--renderer", default="ffmpeg", choices=["ffmpeg", "moviepy"],
+                        help="视频渲染器 (default: ffmpeg, 10x faster)")
+    parser.add_argument("--publish", default="", help="发布平台，逗号分隔: douyin,xiaohongshu")
+    parser.add_argument("--publish-only", action="store_true", help="仅发布已有视频，跳过生成")
+    parser.add_argument("--schedule", default="", help="定时发布: 2026-07-04 20:00")
+    parser.add_argument("--login", default="", help="登录平台(扫码): douyin 或 xiaohongshu")
     args = parser.parse_args()
 
     api_key = args.api_key or load_api_key()
+
+    if args.login:
+        from story_video.publisher import Publisher
+        pub = Publisher()
+        pub.login(args.login)
+        return
+
+    if args.publish_only:
+        if not args.story_file:
+            print("[ERROR] --publish-only requires --story-file")
+            sys.exit(1)
+        video_path = args.output or str(Path(args.story_file).parent / "video.mp4")
+        if not Path(video_path).exists():
+            print(f"[ERROR] Video not found: {video_path}")
+            sys.exit(1)
+        with open(args.story_file, "r", encoding="utf-8") as f:
+            story = json.load(f)
+        platforms = [p.strip() for p in args.publish.split(",") if p.strip()]
+        run_publish(video_path, story, args.topic, platforms, args.schedule)
+        return
+
     if not api_key:
         print("[ERROR] No API key. Set $env:VOLCENGINE_API_KEY or configure config/api-config.json")
         sys.exit(1)
 
-    run_pipeline(
+    video_path = run_pipeline(
         topic=args.topic,
         api_key=api_key,
         voice=args.voice,
@@ -243,6 +331,16 @@ Examples:
         skip_images=args.skip_images,
         story_file=args.story_file,
     )
+
+    if args.publish:
+        platforms = [p.strip() for p in args.publish.split(",") if p.strip()]
+        story_path = Path(video_path).parent / "story.json"
+        if story_path.exists():
+            with open(story_path, "r", encoding="utf-8") as f:
+                story = json.load(f)
+        else:
+            story = {"title": args.topic, "scenes": []}
+        run_publish(video_path, story, args.topic, platforms, args.schedule)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,12 @@
-# API Keys (DO NOT COMMIT)
+# API Keys & Account Info (DO NOT COMMIT)
 config/api-config.json
+config/publish-config.json
+
+# Cookie/session files for social-auto-upload
+cookies/
+**/cookies/
+**/account.json
+**/*_cookie.json
 
 # Generated outputs
 output/

@@ -1,6 +1,38 @@
 from pathlib import Path
 from typing import List, Tuple, Optional
 
+TARGET_W, TARGET_H = 1080, 1920
+FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
+FONT_SIZE = 48
+SUBTITLE_BOTTOM_RATIO = 0.82
+
+
+def compose_video(
+    scenes: List[dict],
+    output_path: str,
+    fps: int = 30,
+    fade_duration: float = 0.5,
+    renderer: str = "ffmpeg",
+) -> str:
+    """
+    Compose final video from scenes.
+    renderer: "ffmpeg" (default, 10x faster) or "moviepy" (fallback)
+
+    Each scene: {image_path, audio_path, duration, subtitles: [(text, start_ms, end_ms)]}
+    """
+    if renderer == "ffmpeg":
+        from story_video.ffmpeg_composer import compose_video_ffmpeg
+        return compose_video_ffmpeg(
+            scenes, output_path, fps=fps, fade_duration=fade_duration
+        )
+    else:
+        return compose_video_moviepy(
+            scenes, output_path, fps=fps, fade_duration=fade_duration
+        )
+
+
+# --- moviepy renderer (fallback, kept for compatibility) ---
+
 import numpy as np
 from PIL import Image, ImageFilter
 from moviepy import (
@@ -12,11 +44,6 @@ from moviepy import (
     ColorClip,
 )
 from moviepy.video.fx import FadeIn, FadeOut
-
-TARGET_W, TARGET_H = 1080, 1920
-FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
-FONT_SIZE = 48
-SUBTITLE_BOTTOM_RATIO = 0.82
 
 
 def create_blurred_bg(image_path: str) -> np.ndarray:
@@ -117,14 +144,14 @@ def create_subtitle_clip(
     return txt
 
 
-def compose_video(
+def compose_video_moviepy(
     scenes: List[dict],
     output_path: str,
     fps: int = 24,
     fade_duration: float = 0.5,
 ) -> str:
     """
-    Compose final video from scenes.
+    Compose final video using moviepy (slow, ~5fps rendering).
     Each scene: {image_path, audio_path, duration, subtitles: [(text, start_ms, end_ms)]}
     """
     scene_clips = []
