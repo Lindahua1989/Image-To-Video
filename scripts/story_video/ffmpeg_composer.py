@@ -418,10 +418,12 @@ def _generate_merged_ass(
     time_offset: float = 0.0,
     fade_ms: int = 200,
 ) -> str:
-    """Generate an ASS subtitle file with fade-in/fade-out animations.
+    """Generate an ASS subtitle file with fade animations and fixed positioning.
 
-    ASS format gives full control over styling (background bar, outline,
-    shadow) and per-line override tags (\\fad for fade animations).
+    Uses \\an8\\pos(x,y) to anchor the TOP of every subtitle at a fixed Y
+    coordinate, eliminating position jumping between 1-line and multi-line
+    subtitles. The top Y is computed from margin_v (bottom margin) and the
+    max line count so the longest subtitle's bottom matches margin_v.
 
     style: dict of ASS style parameters (fontname, fontsize, colours, etc.)
     time_offset: seconds to shift all timestamps (for intro duration).
@@ -432,17 +434,21 @@ def _generate_merged_ass(
     def colour(val):
         return val if str(val).startswith("&H") else f"&H{val}"
 
+    fontsize = s.get("fontsize", 28)
+    margin_v = s.get("margin_v", 60)
+    line_height = fontsize * 1.3  # CJK line height approximation
+
     header = f"""[Script Info]
 Title: Story Subtitles
 ScriptType: v4.00+
-WrapStyle: 0
+WrapStyle: 2
 PlayResX: {TARGET_W}
 PlayResY: {TARGET_H}
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{s['fontname']},{s['fontsize']},{colour(s['primary_colour'])},&H000000FF,{colour(s['outline_colour'])},{colour(s['back_colour'])},{s.get('bold',0)},0,0,0,100,100,{s.get('spacing',0)},0,{s.get('border_style',1)},{s.get('outline',2)},{s.get('shadow',0)},{s.get('alignment',2)},{s.get('margin_l',20)},{s.get('margin_r',20)},{s.get('margin_v',60)},1
+Style: Default,{s['fontname']},{fontsize},{colour(s['primary_colour'])},&H000000FF,{colour(s['outline_colour'])},{colour(s['back_colour'])},{s.get('bold',0)},0,0,0,100,100,{s.get('spacing',0)},0,{s.get('border_style',1)},{s.get('outline',2)},{s.get('shadow',0)},2,{s.get('margin_l',20)},{s.get('margin_r',20)},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -484,21 +490,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         current_time += duration
 
-    # Find max line count to normalize all subtitles to same height
+    # Find max line count to compute a fixed top Y position
     max_lines = max((t.count("\\N") + 1 for _, _, t in processed), default=1)
+    # Top Y: so that a max_lines-tall subtitle has its bottom at (TARGET_H - margin_v)
+    top_y = int(TARGET_H - margin_v - max_lines * line_height)
+    center_x = TARGET_W // 2
 
-    # Second pass: pad short subtitles with leading empty lines
+    # Second pass: write dialogue lines with \an8\pos for fixed top position
     fade_tag = f"\\fad({fade_ms},{fade_ms})"
-    for abs_start, abs_end, safe_text in processed:
-        line_count = safe_text.count("\\N") + 1
-        if line_count < max_lines:
-            # Prepend empty lines so text block height is consistent
-            pad = "\\N" * (max_lines - line_count)
-            safe_text = pad + safe_text
+    pos_tag = f"\\an8\\pos({center_x},{top_y})"
 
+    for abs_start, abs_end, safe_text in processed:
         lines.append(
             f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},"
-            f"Default,,0,0,0,,{{{fade_tag}}}{safe_text}"
+            f"Default,,0,0,0,,{{{fade_tag}}}{pos_tag}{safe_text}"
         )
 
     with open(output_path, "w", encoding="utf-8") as f:
