@@ -15,7 +15,7 @@ def compose_video(
     renderer: str = "ffmpeg",
     bgm_path: str = "",
     bgm_volume: float = 0.12,
-    subtitle_style: str = "",
+    subtitle_style=None,
     intro_config: Optional[dict] = None,
     outro_config: Optional[dict] = None,
     topic: str = "",

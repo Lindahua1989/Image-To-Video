@@ -80,18 +80,11 @@ def get_outro_config(tpl: dict) -> dict:
 
 
 def get_subtitle_style(tpl: dict) -> dict:
-    """Get subtitle style string for FFmpeg force_style."""
+    """Get subtitle style dict for ASS generation."""
     style = tpl.get("subtitle_style", {})
     if not style:
-        return (
-            "Fontname=SimHei,Fontsize=18,Bold=1,"
-            "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-            "BorderStyle=3,Outline=2,Shadow=0,MarginV=60"
-        )
-    parts = []
-    for k, v in style.items():
-        parts.append(f"{k}={v}")
-    return ",".join(parts)
+        return {}
+    return style
 
 
 def get_publish_config(tpl: dict) -> dict:

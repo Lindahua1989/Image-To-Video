@@ -22,11 +22,22 @@ FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
 
 ZOOM_PRESETS = ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_down"]
 
-DEFAULT_SUBTITLE_STYLE = (
-    "Fontname=SimHei,Fontsize=18,Bold=1,"
-    "PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
-    "BorderStyle=3,Outline=2,Shadow=0,MarginV=60"
-)
+DEFAULT_SUBTITLE_STYLE = {
+    "fontname": "SimHei",
+    "fontsize": 28,
+    "bold": 1,
+    "primary_colour": "&H00FFFFFF",
+    "outline_colour": "&H00000000",
+    "back_colour": "&H80000000",
+    "border_style": 3,
+    "outline": 2,
+    "shadow": 0,
+    "alignment": 2,
+    "margin_l": 60,
+    "margin_r": 60,
+    "margin_v": 100,
+    "spacing": 1,
+}
 
 
 def _hex_to_rgb(hex_color: str) -> tuple:
@@ -390,6 +401,99 @@ def _srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
+def _ass_time(seconds: float) -> str:
+    """Convert seconds to ASS timestamp format: H:MM:SS.cc"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    centis = int((seconds % 1) * 100)
+    return f"{hours:d}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+
+def _generate_merged_ass(
+    scenes: List[dict],
+    output_path: str,
+    style: dict,
+    fade_duration: float = FADE_DURATION,
+    time_offset: float = 0.0,
+    fade_ms: int = 200,
+) -> str:
+    """Generate an ASS subtitle file with fade-in/fade-out animations.
+
+    ASS format gives full control over styling (background bar, outline,
+    shadow) and per-line override tags (\\fad for fade animations).
+
+    style: dict of ASS style parameters (fontname, fontsize, colours, etc.)
+    time_offset: seconds to shift all timestamps (for intro duration).
+    fade_ms: fade in/out duration in milliseconds.
+    """
+    s = {**DEFAULT_SUBTITLE_STYLE, **(style or {})}
+
+    def colour(val):
+        return val if str(val).startswith("&H") else f"&H{val}"
+
+    header = f"""[Script Info]
+Title: Story Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+PlayResX: {TARGET_W}
+PlayResY: {TARGET_H}
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{s['fontname']},{s['fontsize']},{colour(s['primary_colour'])},&H000000FF,{colour(s['outline_colour'])},{colour(s['back_colour'])},{s.get('bold',0)},0,0,0,100,100,{s.get('spacing',0)},0,{s.get('border_style',1)},{s.get('outline',2)},{s.get('shadow',0)},{s.get('alignment',2)},{s.get('margin_l',20)},{s.get('margin_r',20)},{s.get('margin_v',60)},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+    lines = [header]
+    current_time = time_offset
+
+    for i, scene in enumerate(scenes):
+        duration = scene["duration"]
+        scene_start = current_time
+
+        for text, start_ms, end_ms in scene.get("subtitles", []):
+            abs_start = scene_start + start_ms / 1000.0
+            abs_end = scene_start + end_ms / 1000.0
+
+            if i > 0:
+                abs_start = max(abs_start, current_time + fade_duration)
+
+            # Escape any special ASS characters in text
+            safe_text = text.replace("\\N", "\\\\N").replace("\\n", "\\\\n")
+            # Wrap long lines: insert \N at ~16 chars for readability
+            if len(safe_text) > 16:
+                mid = len(safe_text) // 2
+                # Find nearest space or punctuation
+                for offset in range(min(6, len(safe_text) - mid)):
+                    for pos in [mid + offset, mid - offset]:
+                        if 0 <= pos < len(safe_text):
+                            if safe_text[pos] in "，。、！？ ":
+                                safe_text = safe_text[:pos+1] + "\\N" + safe_text[pos+1:]
+                                break
+                    else:
+                        continue
+                    break
+
+            fade_tag = f"\\fad({fade_ms},{fade_ms})"
+            lines.append(
+                f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},"
+                f"Default,,0,0,0,,{{{fade_tag}}}{safe_text}"
+            )
+
+        current_time += duration
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    n_entries = len(lines) - 1  # subtract header block
+    print(f"[FFmpeg] Merged ASS: {output_path} | {n_entries} entries | offset={time_offset:.1f}s | fade={fade_ms}ms")
+    return output_path
+
+
 def _merge_audio_files(
     audio_paths: List[str],
     durations: List[float],
@@ -439,7 +543,7 @@ def compose_video_ffmpeg(
     use_blur_bg: bool = True,
     bgm_path: str = "",
     bgm_volume: float = 0.12,
-    subtitle_style: str = "",
+    subtitle_style=None,
     intro_config: Optional[dict] = None,
     outro_config: Optional[dict] = None,
     topic: str = "",
@@ -591,16 +695,28 @@ def compose_video_ffmpeg(
 
         final_label = prev
 
-        style_str = subtitle_style or DEFAULT_SUBTITLE_STYLE
-        srt_path = str(work_dir / "_subtitles.srt")
-        _generate_merged_srt(scenes, srt_path, fade_duration, time_offset=intro_dur)
-        srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
-        filter_parts.append(
-            f"{final_label}subtitles="
-            f"filename='{srt_escaped}':"
-            f"force_style='{style_str}'"
-            f"[vfinal]"
-        )
+        if isinstance(subtitle_style, dict):
+            sub_path = str(work_dir / "_subtitles.ass")
+            _generate_merged_ass(scenes, sub_path, subtitle_style, fade_duration, time_offset=intro_dur)
+            sub_escaped = sub_path.replace("\\", "/").replace(":", "\\:")
+            filter_parts.append(
+                f"{final_label}subtitles="
+                f"filename='{sub_escaped}'"
+                f"[vfinal]"
+            )
+        else:
+            style_str = subtitle_style or DEFAULT_SUBTITLE_STYLE
+            if isinstance(style_str, dict):
+                style_str = ",".join(f"{k}={v}" for k, v in style_str.items())
+            srt_path = str(work_dir / "_subtitles.srt")
+            _generate_merged_srt(scenes, srt_path, fade_duration, time_offset=intro_dur)
+            srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
+            filter_parts.append(
+                f"{final_label}subtitles="
+                f"filename='{srt_escaped}':"
+                f"force_style='{style_str}'"
+                f"[vfinal]"
+            )
 
         filter_complex = ";".join(filter_parts)
 
@@ -647,6 +763,7 @@ def compose_video_ffmpeg(
             work_dir / "_narration_full.mp3",
             work_dir / "_audio_final.mp3",
             work_dir / "_subtitles.srt",
+            work_dir / "_subtitles.ass",
         ]:
             tmp.unlink(missing_ok=True)
 

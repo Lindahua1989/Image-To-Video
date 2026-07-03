@@ -42,14 +42,19 @@
 
   "subtitle_style": {
     "fontname": "SimHei",
-    "fontsize": 20,
+    "fontsize": 28,
     "bold": 1,
     "primary_colour": "&H00FFFFFF",
     "outline_colour": "&H00000000",
+    "back_colour": "&H80000000",
     "border_style": 3,
     "outline": 2,
     "shadow": 0,
-    "margin_v": 60
+    "alignment": 2,
+    "margin_l": 60,
+    "margin_r": 60,
+    "margin_v": 100,
+    "spacing": 1
   },
 
   "publish": {
