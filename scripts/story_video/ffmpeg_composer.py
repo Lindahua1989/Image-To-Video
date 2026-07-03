@@ -451,6 +451,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = [header]
     current_time = time_offset
 
+    # First pass: process all subtitles with auto-wrapping
+    processed = []  # list of (abs_start, abs_end, wrapped_text)
     for i, scene in enumerate(scenes):
         duration = scene["duration"]
         scene_start = current_time
@@ -478,13 +480,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         continue
                     break
 
-            fade_tag = f"\\fad({fade_ms},{fade_ms})"
-            lines.append(
-                f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},"
-                f"Default,,0,0,0,,{{{fade_tag}}}{safe_text}"
-            )
+            processed.append((abs_start, abs_end, safe_text))
 
         current_time += duration
+
+    # Find max line count to normalize all subtitles to same height
+    max_lines = max((t.count("\\N") + 1 for _, _, t in processed), default=1)
+
+    # Second pass: pad short subtitles with leading empty lines
+    fade_tag = f"\\fad({fade_ms},{fade_ms})"
+    for abs_start, abs_end, safe_text in processed:
+        line_count = safe_text.count("\\N") + 1
+        if line_count < max_lines:
+            # Prepend empty lines so text block height is consistent
+            pad = "\\N" * (max_lines - line_count)
+            safe_text = pad + safe_text
+
+        lines.append(
+            f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},"
+            f"Default,,0,0,0,,{{{fade_tag}}}{safe_text}"
+        )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
