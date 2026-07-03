@@ -24,7 +24,7 @@
 
   "intro": {
     "enabled": true,
-    "duration": 2.5,
+    "duration": 1.5,
     "title_template": "{topic}",
     "subtitle_template": "中国神话人物图谱",
     "bg_color": "#1a0a2e",
@@ -34,7 +34,7 @@
 
   "outro": {
     "enabled": true,
-    "duration": 2.5,
+    "duration": 1.5,
     "text": "关注我\n带你走遍中国神话全景",
     "bg_color": "#1a0a2e",
     "text_color": "#FFD700"

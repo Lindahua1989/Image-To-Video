@@ -3,9 +3,10 @@
   "description": "中国神话传说人物介绍系列，覆盖全谱系神话人物",
   "template": "mythology",
   "total": 108,
-  "completed": [],
+  "completed": [
+    "盘古"
+  ],
   "pending": [
-    "盘古",
     "女娲",
     "伏羲",
     "神农",
