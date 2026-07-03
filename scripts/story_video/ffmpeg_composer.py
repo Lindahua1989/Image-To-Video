@@ -497,13 +497,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     center_x = TARGET_W // 2
 
     # Second pass: write dialogue lines with \an8\pos for fixed top position
-    fade_tag = f"\\fad({fade_ms},{fade_ms})"
-    pos_tag = f"\\an8\\pos({center_x},{top_y})"
+    override = f"\\fad({fade_ms},{fade_ms})\\an8\\pos({center_x},{top_y})"
 
     for abs_start, abs_end, safe_text in processed:
         lines.append(
             f"Dialogue: 0,{_ass_time(abs_start)},{_ass_time(abs_end)},"
-            f"Default,,0,0,0,,{{{fade_tag}}}{pos_tag}{safe_text}"
+            f"Default,,0,0,0,,{{{override}}}{safe_text}"
         )
 
     with open(output_path, "w", encoding="utf-8") as f:
