@@ -42,9 +42,9 @@
 
   "subtitle_style": {
     "fontname": "SimHei",
-    "fontsize": 28,
+    "fontsize": 32,
     "bold": 1,
-    "primary_colour": "&H00FFFFFF",
+    "primary_colour": "&H0000D7FF",
     "outline_colour": "&H00000000",
     "back_colour": "&H80000000",
     "border_style": 3,
@@ -53,7 +53,7 @@
     "alignment": 2,
     "margin_l": 60,
     "margin_r": 60,
-    "margin_v": 100,
+    "margin_v": 160,
     "spacing": 1
   },
 
