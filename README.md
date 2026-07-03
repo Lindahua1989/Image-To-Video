@@ -1,6 +1,6 @@
 # AI 图片生成 & 历史故事短视频工作流
 
-基于火山引擎方舟（即梦AI）+ edge-tts + FFmpeg + social-auto-upload 的自动化内容生成与发布工具。
+基于火山引擎方舟（即梦AI）+ edge-tts + FFmpeg + social-auto-upload + MiniMax Music 的自动化内容生成与发布工具。
 
 ## 功能
 
@@ -11,8 +11,24 @@
 python scripts/generate_image.py --prompt "你的提示词" --provider volcengine --size 2K
 ```
 
-### 2. 历史故事短视频生成
-一句话生成抖音竖版短视频（1080x1920），包含旁白语音 + 字幕 + 图片动画 + 片头片尾 + 背景音乐。
+### 2. 背景音乐生成
+通过 MiniMax Music 2.6 API 免费生成纯器乐 BGM（每日100次免费额度）。
+
+```bash
+# 生成中国风BGM
+python scripts/generate_bgm.py --prompt "中国古风, 古筝, 笛子, 神话, 庄重, 叙事"
+
+# 指定输出路径
+python scripts/generate_bgm.py --prompt "..." --output templates/assets/bgm/mythology_bgm.mp3
+
+# 查看已有BGM文件
+python scripts/generate_bgm.py --list
+```
+
+> 需要 MiniMax API Key，填入 `config/api-config.json` 的 `minimax_api_key` 字段。
+
+### 3. 历史故事短视频生成
+一句话生成抖音竖版短视频（1080x1920），包含旁白语音 + ASS字幕 + 图片动画 + 片头片尾 + 背景音乐。
 
 ```bash
 # 通用模式
@@ -20,6 +36,9 @@ python -m story_video.main --topic "苏轼的赤壁怀古"
 
 # 中国神话人物系列（片头+片尾+BGM+工笔重彩画风）
 python -m story_video.main --topic "盘古" --template mythology
+
+# 使用已有story.json + 已有图片（跳过图片生成）
+python -m story_video.main --topic "盘古" --template mythology --story-file output/story_pangu/story.json --skip-images
 
 # 生成并直接发布到抖音+小红书
 python -m story_video.main --topic "曹操" --publish douyin,xiaohongshu
@@ -34,14 +53,14 @@ python -m story_video.main --list-templates
 详细自动发布安装指南见 [docs/AUTO_PUBLISH_GUIDE.md](docs/AUTO_PUBLISH_GUIDE.md)。
 
 工作流：
-1. **文案 + 分镜**：由 AI 助手直接生成 story.json（旁白 + 图片提示词）
+1. **文案 + 分镜**：由 AI 助手直接生成 story.json（旁白 + 图片提示词），无需调用文本模型 API
 2. **图片生成**：即梦AI doubao-seedream-5-0 生成场景图
 3. **语音合成**：edge-tts 生成中文旁白 + 字幕时间轴
-4. **视频合成**：FFmpeg 合成竖版视频（片头 + Ken Burns缩放 + 模糊背景 + 字幕 + 交叉转场 + 片尾 + BGM）
+4. **视频合成**：FFmpeg 合成竖版视频（片头 + Ken Burns缩放 + 模糊背景 + ASS字幕 + 交叉转场 + 片尾 + BGM）
 5. **自动发布**：social-auto-upload 自动上传到抖音/小红书/B站等平台
 
-### 3. 模板系统
-模板定义了故事风格、画风、配音、BGM、片头片尾、发布标签等全套配置。
+### 4. 模板系统
+模板定义了故事风格、画风、配音、BGM、片头片尾、字幕样式、发布标签等全套配置。
 
 ```bash
 # 列出所有模板
@@ -65,7 +84,7 @@ python scripts/generate_mythology_batch.py --name 盘古
 ### 基础安装
 
 ```bash
-pip install openai edge-tts moviepy Pillow imageio-ffmpeg
+pip install openai edge-tts moviepy Pillow imageio-ffmpeg requests
 ```
 
 ### 自动发布功能安装（可选）
@@ -87,10 +106,11 @@ Copy-Item conf.example.py conf.py
 ## 配置
 
 ### 1. API 配置
-1. 注册火山引擎账号 https://console.volcengine.com/ark
-2. 开通模型：`doubao-seedream-5-0-260128`（图片生成）
-3. 创建 API Key
-4. 复制 `config/api-config.example.json` 为 `config/api-config.json`，填入 API Key
+1. **火山引擎（图片生成）**：注册账号 https://console.volcengine.com/ark → 开通模型 `doubao-seedream-5-0-260128` → 创建 API Key
+2. **MiniMax（BGM 生成，可选）**：注册 https://platform.minimaxi.com → 创建 API Key → 完成实名认证激活免费额度（每日100次）
+3. 复制 `config/api-config.example.json` 为 `config/api-config.json`，填入：
+   - `volcengine_api_key` — 即梦AI图片生成
+   - `minimax_api_key` — MiniMax Music BGM 生成（可选）
 
 ### 2. 发布配置
 1. 复制 `config/publish-config.example.json` 为 `config/publish-config.json`
@@ -108,17 +128,21 @@ python -m story_video.main --topic "test" --login xiaohongshu
 | 组件 | 技术 | 说明 |
 |------|------|------|
 | 图片生成 | 即梦AI 5.0 (doubao-seedream) | 火山引擎方舟API，OpenAI SDK调用 |
-| 语音合成 | edge-tts | 微软TTS，免费，6种中文语音 |
-| 视频合成 | FFmpeg (imageio_ffmpeg) | zoompan Ken Burns效果，xfade转场，字幕叠加 |
+| BGM生成 | MiniMax Music 2.6 | 免费模型 `music-2.6-free`，纯器乐，每日100次 |
+| 语音合成 | edge-tts | 微软TTS，免费，6种中文语音，词级时间戳 |
+| 字幕系统 | ASS (Advanced SubStation Alpha) | 淡入淡出动画 + 绝对定位 + 金黄色字体 + 自动换行 |
+| 视频合成 | FFmpeg (imageio_ffmpeg) | zoompan Ken Burns效果，xfade转场，ASS字幕叠加 |
 | 自动发布 | social-auto-upload | Playwright浏览器自动化，支持抖音/小红书/B站等 |
 | API调用 | OpenAI Python SDK | 兼容火山方舟API格式 |
 
-## 性能对比
+## 性能
 
-| 渲染器 | 3场景视频(35秒) | 文件大小 | 说明 |
-|--------|---------------|---------|------|
-| moviepy | ~3分钟 | 18.9MB | 逐帧PIL渲染，慢但功能全 |
-| **FFmpeg** | **~32秒** | **6.9MB** | zoompan滤镜，10倍加速，默认使用 |
+| 指标 | 数值 | 说明 |
+|------|------|------|
+| 4场景视频渲染 | ~43秒 | 使用已有图片（skip-images），含TTS+FFmpeg+BGM |
+| 视频时长 | ~57秒 | 4场景 × ~13秒旁白 + 1.5s片头 + 1.5s片尾 |
+| FFmpeg vs moviepy | 10x加速 | FFmpeg ~32s vs moviepy ~3min（3场景） |
+| 输出分辨率 | 1080x1920 | 竖版，适配抖音/小红书 |
 
 ## CLI 参数
 
@@ -129,14 +153,13 @@ python -m story_video.main --topic "test" --login xiaohongshu
 --voice, -v          配音语音: yunxi/yunjian/xiaoxiao/yunyang (留空=模板默认)
 --output, -o         输出视频路径
 --num-scenes, -n     场景数量 (0=模板默认)
+--story-file         指定story.json路径（必须预先由AI助手生成）
+--skip-images        跳过图片生成，使用已有图片
 --renderer           渲染器: ffmpeg(默认) 或 moviepy
 --publish            发布平台: douyin,xiaohongshu
 --publish-only       仅发布已有视频
 --schedule           定时发布: 2026-07-04 20:00
 --login              扫码登录平台: douyin 或 xiaohongshu
---skip-story         跳过故事生成
---skip-images        跳过图片生成
---story-file         指定story.json路径
 ```
 
 ## 项目结构
@@ -155,11 +178,11 @@ python -m story_video.main --topic "test" --login xiaohongshu
 │   └── assets/bgm/                   # 背景音乐文件目录
 ├── scripts/
 │   ├── generate_image.py             # 单张图片生成
+│   ├── generate_bgm.py               # MiniMax Music BGM 生成
 │   ├── generate_mythology_batch.py   # 神话系列批量生成
 │   └── story_video/
-│       ├── story_generator.py        # 故事脚本生成（支持模板prompt）
 │       ├── tts_engine.py             # edge-tts 语音合成 + 字幕
-│       ├── ffmpeg_composer.py        # FFmpeg 视频合成（片头+片尾+BGM+字幕）
+│       ├── ffmpeg_composer.py        # FFmpeg 视频合成（片头+片尾+BGM+ASS字幕）
 │       ├── video_composer.py         # 视频合成入口（ffmpeg/moviepy切换）
 │       ├── template_loader.py        # 模板加载器
 │       ├── publisher.py              # 多平台自动发布模块
@@ -168,6 +191,20 @@ python -m story_video.main --topic "test" --login xiaohongshu
 └── .opencode/
     └── skills/generate-image/        # opencode 图片生成skill
 ```
+
+## 字幕系统
+
+使用 ASS (Advanced SubStation Alpha) 格式，支持丰富的字幕效果：
+
+| 功能 | 实现方式 |
+|------|---------|
+| 淡入淡出动画 | `\fad(200,200)` — 200ms 淡入+淡出 |
+| 位置固定 | `\an8\pos(x,y)` — 顶部锚定，消除行数变化导致的跳动 |
+| 自动换行 | 长字幕在标点处自动插入 `\N` 分行 |
+| 字体样式 | 金黄色(#FFD700) + 4px黑色描边 + 阴影，无背景条 |
+| 字号 | 32px（竖屏1080x1920，适合手机观看） |
+
+字幕样式通过模板的 `subtitle_style` 字段配置，支持所有 ASS 参数（fontname, fontsize, primary_colour, outline, shadow, border_style, margin_v 等）。
 
 ## 支持的发布平台
 
